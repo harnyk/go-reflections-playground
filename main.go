@@ -8,14 +8,20 @@ import (
 	"github.com/oleiade/reflections"
 )
 
+type Bathroom struct {
+	Surface int64
+	Name    string
+}
+
 type Attributes struct {
-	Legal Legal
+	Legal     *Legal
+	Bathrooms []Bathroom
 }
 
 type Legal struct {
 	Foo    *string
 	Bar    string
-	Energy Energy
+	Energy *Energy
 }
 
 type Energy struct {
@@ -41,9 +47,13 @@ func deepStructToMap(input any, output map[string]interface{}, prefix string) er
 		}
 
 		if kind == reflect.Ptr {
-			v := *value
-
-			t := reflect.TypeOf(v)
+			ptr := reflect.ValueOf(value)
+			if ptr.IsNil() {
+				output[prefix+field] = nil
+				continue
+			}
+			value = ptr.Elem().Interface()
+			t := reflect.TypeOf(value)
 			kind = t.Kind()
 		}
 
@@ -59,6 +69,20 @@ func deepStructToMap(input any, output map[string]interface{}, prefix string) er
 			{
 				return errors.New("shit")
 			}
+		case reflect.Slice:
+			{
+				slice := reflect.ValueOf(value)
+				if slice.IsNil() {
+					output[prefix+field] = nil
+					continue
+				}
+				for i := 0; i < slice.Len(); i++ {
+					err = deepStructToMap(slice.Index(i).Interface(), output, fmt.Sprintf("%s%s[%d].", prefix, field, i))
+					if err != nil {
+						return err
+					}
+				}
+			}
 		default:
 			{
 				output[prefix+field] = value
@@ -68,31 +92,60 @@ func deepStructToMap(input any, output map[string]interface{}, prefix string) er
 	return nil
 }
 
+func getListOfZeroMapFields(input map[string]interface{}) []string {
+	var fields []string
+	for key, value := range input {
+		v := reflect.ValueOf(value)
+
+		if value == nil || v.IsZero() {
+			fields = append(fields, key)
+		}
+	}
+	return fields
+}
+
+func GetZeroFieldPaths(input any) (res []string, err error) {
+	output := make(map[string]interface{})
+	err = deepStructToMap(input, output, "")
+	if err != nil {
+		return
+	}
+
+	return getListOfZeroMapFields(output), nil
+}
+
 func strPtr(s string) *string {
 	return &s
 }
 
 func main() {
 
-	output := make(map[string]interface{})
-
 	value := &Attributes{
-		Legal: Legal{
+		Bathrooms: []Bathroom{
+			{
+				Name:    "bathroom1",
+				Surface: 100,
+			},
+			{
+				Name:    "bathroom2",
+				Surface: 200,
+			},
+		},
+		Legal: &Legal{
 			Foo: strPtr("foo"),
 			Bar: "bar",
-			Energy: Energy{
+			Energy: &Energy{
 				EPCLevel:         1,
 				TotalConsumption: 2,
 				Class:            "class",
-			}}}
+			},
+		},
+	}
 
-	err := deepStructToMap(value, output, "")
+	empties, err := GetZeroFieldPaths(value)
 	if err != nil {
 		panic(err)
 	}
-
-	for k, v := range output {
-		fmt.Printf("%s: %v\n", k, v)
-	}
+	fmt.Printf("empties: %v\n", empties)
 
 }
